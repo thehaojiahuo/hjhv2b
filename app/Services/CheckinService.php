@@ -35,14 +35,10 @@ class CheckinService
         $max = 1024 * 1024 * 1024; // 1GB
         $traffic = rand($min, $max);
 
-        // 获取用户已用流量
-        $usedTraffic = $user->u + $user->d;
-        
-        // 计算新的总流量：确保不低于已用流量
-        $newTransferEnable = max($usedTraffic, $user->transfer_enable + $traffic);
-        
-        // 更新用户流量
-        $user->transfer_enable = $newTransferEnable;
+        // 通过减少已用流量(d)来增加剩余流量，而不是增加总流量
+        // 这样续费时重置 transfer_enable 不会影响签到效果
+        // 允许 d 变成负数，相当于"预存"流量
+        $user->d -= $traffic;
         $user->save();
 
         // 记录用户签到状态
@@ -89,7 +85,7 @@ class CheckinService
 
         // 转换为字节
         $multiplier = strtoupper($unit) === 'GB' ? 1024 * 1024 * 1024 : 1024 * 1024;
-        $inputBytes = (int)($value * $multiplier);
+        $inputBytes = (int) ($value * $multiplier);
 
         // 检查输入值是否超过用户剩余流量
         $usedTraffic = $user->u + $user->d; // 已用流量
@@ -106,14 +102,22 @@ class CheckinService
         // 生成随机流量 (-inputBytes 到 +inputBytes)
         $traffic = rand(-$inputBytes, $inputBytes);
 
-        // 获取用户已用流量
-        $usedTraffic = $user->u + $user->d;
-        
-        // 计算新的总流量：确保不低于已用流量
-        $newTransferEnable = max($usedTraffic, $user->transfer_enable + $traffic);
-        
-        // 更新用户流量
-        $user->transfer_enable = $newTransferEnable;
+        // 通过调整已用流量(d)来改变剩余流量，而不是改变总流量
+        // 获得流量(traffic > 0)：减少 d，增加剩余流量
+        // 扣除流量(traffic < 0)：增加 d，减少剩余流量
+        // 允许 d 变成负数，相当于"预存"流量
+        if ($traffic >= 0) {
+            // 获得流量：减少已用流量（允许变成负数）
+            $user->d -= $traffic;
+        } else {
+            // 扣除流量：增加已用流量，但不能超过剩余流量
+            $absTraffic = abs($traffic);
+            $currentRemaining = $user->transfer_enable - $user->u - $user->d;
+            $actualDeduct = min($absTraffic, $currentRemaining); // 不能扣成负剩余
+            $user->d += $actualDeduct;
+            $traffic = -$actualDeduct; // 实际扣除的流量
+        }
+
         $user->save();
 
         // 记录用户签到状态
@@ -153,7 +157,7 @@ class CheckinService
             ];
         }
 
-        $value = (int)$matches[1];
+        $value = (int) $matches[1];
         $unit = strtoupper($matches[2]);
 
         // 复用现有的luckyCheckin方法
