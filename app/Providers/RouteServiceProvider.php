@@ -67,17 +67,68 @@ class RouteServiceProvider extends ServiceProvider
      */
     protected function mapApiRoutes()
     {
+        // Define /test/v3 routes
+        Route::group([
+            'prefix' => '/test/v3',
+            'middleware' => 'api',
+            'namespace' => $this->namespace
+        ], function ($router) {
+            foreach (glob(app_path('Http//Routes//V1') . '/*.php') as $file) {
+                if (basename($file) !== 'ServerRoute.php') {
+                    $this->app->make('App\\Http\\Routes\\V1\\' . basename($file, '.php'))->map($router);
+                }
+            }
+        });
+        
+        // Define /test/v3 routes
+        Route::group([
+            'prefix' => '/douyin/ds',
+            'middleware' => 'api',
+            'namespace' => $this->namespace
+        ], function ($router) {
+            foreach (glob(app_path('Http//Routes//V1') . '/*.php') as $file) {
+                if (basename($file) !== 'ServerRoute.php') {
+                    $this->app->make('App\\Http\\Routes\\V1\\' . basename($file, '.php'))->map($router);
+                }
+            }
+        });
+
+        // Define /api/v1 routes
         Route::group([
             'prefix' => '/api/v1',
             'middleware' => 'api',
             'namespace' => $this->namespace
         ], function ($router) {
             foreach (glob(app_path('Http//Routes//V1') . '/*.php') as $file) {
-                $this->app->make('App\\Http\\Routes\\V1\\' . basename($file, '.php'))->map($router);
+                if (basename($file) !== 'ServerRoute.php') {
+                    $this->app->make('App\\Http\\Routes\\V1\\' . basename($file, '.php'))->map($router);
+                }
             }
         });
 
+        // Define /api/v1 routes
+        Route::group([
+            'prefix' => '/hjh',
+            'middleware' => 'api',
+            'namespace' => $this->namespace
+        ], function ($router) {
+            foreach (glob(app_path('Http//Routes//V1') . '/*.php') as $file) {
+                if (basename($file) !== 'ServerRoute.php') {
+                    $this->app->make('App\\Http\\Routes\\V1\\' . basename($file, '.php'))->map($router);
+                }
+            }
+        });
 
+        // Include ServerRoute for /api/v1
+        Route::group([
+            'prefix' => '/api/v1',
+            'middleware' => 'api',
+            'namespace' => $this->namespace
+        ], function ($router) {
+            $this->app->make('App\\Http\\Routes\\V1\\ServerRoute')->map($router);
+        });
+
+        // Define /api/v2 routes
         Route::group([
             'prefix' => '/api/v2',
             'middleware' => 'api',
