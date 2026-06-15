@@ -115,10 +115,19 @@ class ClientController extends Controller
             $ruleUa = isset($rule['ua']) ? trim((string)$rule['ua']) : '';
             if ($ruleUa === '') continue;
             if (empty($rule['nodes']) || !is_array($rule['nodes'])) continue;
+                        
+            // Support comma-separated multiple UAs
+            $uas = explode(',', $ruleUa);
+            
             foreach ($rule['nodes'] as $node) {
                 if (!is_array($node) || empty($node['type']) || !isset($node['id'])) continue;
                 $key = $node['type'] . ':' . (int)$node['id'];
-                $restricted[$key][] = $ruleUa;
+                foreach ($uas as $singleUa) {
+                    $singleUa = trim($singleUa);
+                    if ($singleUa !== '') {
+                        $restricted[$key][] = $singleUa;
+                    }
+                }
             }
         }
         if (empty($restricted)) return;
