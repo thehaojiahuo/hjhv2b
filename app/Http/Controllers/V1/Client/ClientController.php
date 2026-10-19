@@ -102,7 +102,17 @@ class ClientController extends Controller
         $matchedRules = [];
         foreach ($rules as $rule) {
             if (empty($rule['ua']) || empty($rule['domain']) || empty($rule['ip'])) continue;
-            if (stripos($ua, $rule['ua']) !== false) {
+            $uas = preg_split('/[,，|;；\n\r]+/u', (string)$rule['ua'], -1, PREG_SPLIT_NO_EMPTY);
+            $matched = false;
+            foreach ($uas as $targetUa) {
+                $targetUa = trim($targetUa);
+                if ($targetUa === '') continue;
+                if ($targetUa === '*' || stripos($ua, $targetUa) !== false) {
+                    $matched = true;
+                    break;
+                }
+            }
+            if ($matched) {
                 $matchedRules[] = $rule;
             }
         }
@@ -133,6 +143,7 @@ class ClientController extends Controller
             $ruleUa = isset($rule['ua']) ? trim((string)$rule['ua']) : '';
             if ($ruleUa === '') continue;
             if (empty($rule['nodes']) || !is_array($rule['nodes'])) continue;
+            $uas = preg_split('/[,，|;；\n\r]+/u', $ruleUa, -1, PREG_SPLIT_NO_EMPTY);
                         
             // Support comma-separated multiple UAs
             $uas = explode(',', $ruleUa);
