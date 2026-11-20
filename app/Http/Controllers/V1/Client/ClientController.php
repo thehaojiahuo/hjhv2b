@@ -3,11 +3,14 @@
 namespace App\Http\Controllers\V1\Client;
 
 use App\Http\Controllers\Controller;
+use App\Protocols\Clash;
+use App\Protocols\ClashMeta;
+use App\Protocols\ClashNyanpasu;
+use App\Protocols\ClashVerge;
 use App\Protocols\General;
 use App\Protocols\NextinEncrypted;
 use App\Protocols\Singbox\Singbox;
 use App\Protocols\Singbox\SingboxOld;
-use App\Protocols\ClashMeta;
 use App\Services\InsiderGuardService;
 use App\Services\ServerService;
 use App\Services\SubscribeEncryptService;
@@ -54,47 +57,82 @@ class ClientController extends Controller
             $this->applyDomainRewriteRules($servers, $flag);
             $this->applyNodeWhitelistRules($servers, $flag);
             InsiderGuardService::recordSubscribe($user, $request, $servers, $decoy);
-            if($flag) {
-                $nextinEncrypted = new NextinEncrypted($user, $servers);
+            $protocol = null;
+            $version = null;
+            if ($flag) {
                 $shouldReturnEncryptedClashMeta =
                     NextinEncrypted::shouldEncryptForUserAgent($userAgent)
-                    || strpos($flag, $nextinEncrypted->flag) !== false;
+                    || strpos($flag, get_class_vars(NextinEncrypted::class)['flag']) !== false;
 
                 if ($shouldReturnEncryptedClashMeta || !$isSingBox) {
                     $this->setSubscribeInfoToServers($servers, $user);
-                    $nextinEncrypted = new NextinEncrypted($user, $servers);
                 }
 
                 if ($shouldReturnEncryptedClashMeta) {
                     $this->nextinHandled = true;
-                    return $nextinEncrypted->handle();
-                }
-
-                if (!$isSingBox) {
+                    $protocol = NextinEncrypted::class;
+                } elseif (!$isSingBox) {
                     foreach (array_reverse(glob(app_path('Protocols') . '/*.php')) as $file) {
                         $file = 'App\\Protocols\\' . basename($file, '.php');
-                        $class = new $file($user, $servers);
-                        if (strpos($flag, $class->flag) !== false) {
-                            return $class->handle();
+                        if (strpos($flag, get_class_vars($file)['flag']) !== false) {
+                            $protocol = $file;
+                            break;
                         }
                     }
-                }
-                if ($isSingBox) {
-                    $version = null;
+                } else {
                     // 保留预发布后缀（1.13.0-beta.2），后续按版本下发新字段时才不会把预发布版当成正式版
                     if (preg_match('/sing-box\s+([0-9]+(?:\.[0-9]+)*(?:-[0-9A-Za-z.]+)?)/i', $flag, $matches)) {
                         $version = $matches[1];
                     }
                     if (!is_null($version) && $version >= '1.12.0') {
-                        $class = new Singbox($user, $servers, ['version' => $version]);
+                        $protocol = Singbox::class;
                     } else {
-                        $class = new SingboxOld($user, $servers);
+                        $protocol = SingboxOld::class;
                     }
-                    return $class->handle();
                 }
             }
-            $class = new General($user, $servers);
-            return $class->handle();
+
+            $this->applySelfSignedFallback($servers, $protocol, $version);
+
+            if ($protocol === Singbox::class) {
+                return (new Singbox($user, $servers, ['version' => $version]))->handle();
+            }
+            $protocol = $protocol ?? General::class;
+            return (new $protocol($user, $servers))->handle();
+        }
+    }
+
+    /**
+     * 上游做法：Clash 系、sing-box 订阅里「自签名（面板下发）」证书的 v2node 节点改成允许不安全，否则连不上。
+     * 本仓库能给客户端下发证书固定的（mihomo 的 fingerprint、sing-box 1.13+ 的公钥固定）保持原样，pin 照常校验；
+     * NextinEncrypted 的客户端不读 fingerprint，按上游做法处理
+     */
+    private function applySelfSignedFallback(array &$servers, ?string $protocol, ?string $version)
+    {
+        if (!in_array($protocol, [
+            Clash::class, ClashMeta::class, ClashNyanpasu::class, ClashVerge::class, NextinEncrypted::class,
+            Singbox::class, SingboxOld::class,
+        ], true)) {
+            return;
+        }
+        foreach ($servers as $key => $server) {
+            if ($server['type'] !== 'v2node' || (int)$server['tls'] !== 1
+                || ($server['tls_settings']['cert_mode'] ?? null) !== 'remote') {
+                continue;
+            }
+            if (in_array($protocol, [ClashMeta::class, ClashNyanpasu::class, ClashVerge::class], true)
+                && Helper::clientPinSha256($server) !== '') {
+                continue;
+            }
+            if ($protocol === Singbox::class && version_compare($version, '1.13.0', '>=')
+                && Helper::pinnedPublicKeySha256($server) !== '') {
+                continue;
+            }
+            $servers[$key]['tls_settings']['allow_insecure'] = 1;
+            if ($server['protocol'] === 'vmess') {
+                // Clash Meta's VMess builders read the legacy spelling.
+                $servers[$key]['tls_settings']['allowInsecure'] = 1;
+            }
         }
     }
 
